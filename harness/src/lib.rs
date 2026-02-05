@@ -510,6 +510,8 @@ use {
 
 pub(crate) const DEFAULT_LOADER_KEY: Pubkey = solana_sdk_ids::bpf_loader_upgradeable::id();
 
+unsafe impl Send for Mollusk {}
+unsafe impl Sync for Mollusk {}
 /// The Mollusk API, providing a simple interface for testing Solana programs.
 ///
 /// All fields can be manipulated through a handful of helper methods, but
@@ -519,7 +521,6 @@ pub struct Mollusk {
     pub compute_budget: ComputeBudget,
     pub epoch_stake: EpochStake,
     pub feature_set: FeatureSet,
-    pub logger: Option<Rc<RefCell<LogCollector>>>,
     pub program_cache: ProgramCache,
     pub sysvars: Sysvars,
 
@@ -740,7 +741,6 @@ impl Mollusk {
             compute_budget,
             epoch_stake: EpochStake::default(),
             feature_set,
-            logger: None,
             program_cache,
             sysvars: Sysvars::default(),
 
@@ -1013,7 +1013,7 @@ impl Mollusk {
                 &program_runtime_environments,
                 sysvar_cache,
             ),
-            self.logger.clone(),
+            None,
             self.compute_budget.to_budget(),
             self.compute_budget.to_cost(),
         );

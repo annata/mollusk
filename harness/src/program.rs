@@ -21,6 +21,7 @@ use {
         sync::Arc,
     },
 };
+use crate::Mollusk;
 
 /// Loader keys, re-exported from `solana_sdk` for convenience.
 pub mod loader_keys {
@@ -61,8 +62,10 @@ pub struct CacheEntry {
     pub elf_bytes: Option<Vec<u8>>,
 }
 
+unsafe impl Send for ProgramCache {}
+unsafe impl Sync for ProgramCache {}
 pub struct ProgramCache {
-    cache: Rc<RefCell<ProgramCacheForTxBatch>>,
+    cache: Arc<RefCell<ProgramCacheForTxBatch>>,
     // This stinks, but the `ProgramCacheForTxBatch` doesn't offer a way to
     // access its entries directly. In order to make DX easier for those using
     // `MolluskContext`, we need to track entries added to the cache,
@@ -72,7 +75,7 @@ pub struct ProgramCache {
     // already.
     //
     // K: program ID, V: cache entry
-    entries_cache: Rc<RefCell<HashMap<Pubkey, CacheEntry>>>,
+    entries_cache: Arc<RefCell<HashMap<Pubkey, CacheEntry>>>,
     // The function registry (syscalls) to use for verifying and loading
     // program ELFs.
     pub program_runtime_environment: BuiltinProgram<InvokeContext<'static, 'static>>,
@@ -85,8 +88,8 @@ impl ProgramCache {
         enable_register_tracing: bool,
     ) -> Self {
         let me = Self {
-            cache: Rc::new(RefCell::new(ProgramCacheForTxBatch::default())),
-            entries_cache: Rc::new(RefCell::new(HashMap::new())),
+            cache: Arc::new(RefCell::new(ProgramCacheForTxBatch::default())),
+            entries_cache: Arc::new(RefCell::new(HashMap::new())),
             program_runtime_environment: create_program_runtime_environment_v1(
                 &feature_set.runtime_features(),
                 &compute_budget.to_budget(),
