@@ -969,6 +969,7 @@ impl Mollusk {
         sanitized_message: &'a SanitizedMessage,
         transaction_context: &mut TransactionContext<'a>,
         sysvar_cache: &SysvarCache,
+        log_collector: Option<Rc<RefCell<LogCollector>>>,
     ) -> MessageResult {
         let mut compute_units_consumed = 0;
         let mut timings = ExecuteTimings::default();
@@ -1013,7 +1014,7 @@ impl Mollusk {
                 &program_runtime_environments,
                 sysvar_cache,
             ),
-            None,
+            log_collector,
             self.compute_budget.to_budget(),
             self.compute_budget.to_cost(),
         );
@@ -1103,6 +1104,7 @@ impl Mollusk {
         accounts: &[(Pubkey, Account)],
         fallback_accounts: &HashMap<Pubkey, Account>,
         sysvar_cache: &SysvarCache,
+        log_collector: Option<Rc<RefCell<LogCollector>>>,
     ) -> InstructionResult {
         let (sanitized_message, transaction_accounts) = crate::compile_accounts::compile_accounts(
             std::slice::from_ref(instruction),
@@ -1117,6 +1119,7 @@ impl Mollusk {
             &sanitized_message,
             &mut transaction_context,
             sysvar_cache,
+            log_collector,
         );
 
         let resulting_accounts = if message_result.raw_result.is_ok() {
@@ -1177,6 +1180,7 @@ impl Mollusk {
         &self,
         instruction: &Instruction,
         accounts: &[(Pubkey, Account)],
+        log_collector: Option<Rc<RefCell<LogCollector>>>,
     ) -> InstructionResult {
         let fallback_accounts = self.get_account_fallbacks(
             std::iter::once(&instruction.program_id),
@@ -1197,6 +1201,7 @@ impl Mollusk {
             &sanitized_message,
             &mut transaction_context,
             &sysvar_cache,
+            log_collector,
         );
 
         let resulting_accounts = if message_result.raw_result.is_ok() {
@@ -1272,6 +1277,7 @@ impl Mollusk {
         &self,
         instructions: &[Instruction],
         accounts: &[(Pubkey, Account)],
+        log_collector: Option<Rc<RefCell<LogCollector>>>,
     ) -> InstructionResult {
         let mut composite_result = InstructionResult {
             resulting_accounts: accounts.to_vec(),
@@ -1293,6 +1299,7 @@ impl Mollusk {
                 &composite_result.resulting_accounts,
                 &fallback_accounts,
                 &sysvar_cache,
+                log_collector.clone(),
             );
 
             composite_result.absorb(this_result);
@@ -1325,6 +1332,7 @@ impl Mollusk {
         &self,
         instructions: &[Instruction],
         accounts: &[(Pubkey, Account)],
+        log_collector: Option<Rc<RefCell<LogCollector>>>,
     ) -> TransactionResult {
         let fallback_accounts = self.get_account_fallbacks(
             instructions.iter().map(|ix| &ix.program_id),
@@ -1345,6 +1353,7 @@ impl Mollusk {
             &sanitized_message,
             &mut transaction_context,
             &sysvar_cache,
+            log_collector,
         );
 
         let resulting_accounts = if message_result.raw_result.is_ok() {
@@ -1396,8 +1405,9 @@ impl Mollusk {
         instruction: &Instruction,
         accounts: &[(Pubkey, Account)],
         checks: &[Check],
+        log_collector: Option<Rc<RefCell<LogCollector>>>,
     ) -> InstructionResult {
-        let result = self.process_instruction(instruction, accounts);
+        let result = self.process_instruction(instruction, accounts, log_collector);
         result.run_checks(checks, &self.config, self);
         result
     }
@@ -1436,6 +1446,7 @@ impl Mollusk {
         &self,
         instructions: &[(&Instruction, &[Check])],
         accounts: &[(Pubkey, Account)],
+        log_collector: Option<Rc<RefCell<LogCollector>>>,
     ) -> InstructionResult {
         let mut composite_result = InstructionResult {
             resulting_accounts: accounts.to_vec(),
@@ -1457,6 +1468,7 @@ impl Mollusk {
                 &composite_result.resulting_accounts,
                 &fallback_accounts,
                 &sysvar_cache,
+                log_collector.clone(),
             );
 
             this_result.run_checks(checks, &self.config, self);
@@ -1493,8 +1505,9 @@ impl Mollusk {
         instructions: &[Instruction],
         accounts: &[(Pubkey, Account)],
         checks: &[Check],
+        log_collector: Option<Rc<RefCell<LogCollector>>>,
     ) -> TransactionResult {
-        let result = self.process_transaction_instructions(instructions, accounts);
+        let result = self.process_transaction_instructions(instructions, accounts, log_collector);
         result.run_checks(checks, &self.config, self);
         result
     }
@@ -1517,6 +1530,7 @@ impl Mollusk {
     pub fn process_fixture(
         &mut self,
         fixture: &mollusk_svm_fuzz_fixture::Fixture,
+        log_collector: Option<Rc<RefCell<LogCollector>>>,
     ) -> InstructionResult {
         let fuzz::mollusk::ParsedFixtureContext {
             accounts,
@@ -1528,7 +1542,7 @@ impl Mollusk {
         self.compute_budget = compute_budget;
         self.feature_set = feature_set;
         self.sysvars = sysvars;
-        self.process_instruction(&instruction, &accounts)
+        self.process_instruction(&instruction, &accounts, log_collector)
     }
 
     #[cfg(feature = "fuzz")]
@@ -1553,8 +1567,9 @@ impl Mollusk {
     pub fn process_and_validate_fixture(
         &mut self,
         fixture: &mollusk_svm_fuzz_fixture::Fixture,
+        log_collector: Option<Rc<RefCell<LogCollector>>>,
     ) -> InstructionResult {
-        let result = self.process_fixture(fixture);
+        let result = self.process_fixture(fixture, log_collector);
         InstructionResult::from(&fixture.output).compare_with_config(
             &result,
             &Compare::everything(),
@@ -1594,8 +1609,9 @@ impl Mollusk {
         &mut self,
         fixture: &mollusk_svm_fuzz_fixture::Fixture,
         checks: &[Compare],
+        log_collector: Option<Rc<RefCell<LogCollector>>>,
     ) -> InstructionResult {
-        let result = self.process_fixture(fixture);
+        let result = self.process_fixture(fixture, log_collector);
         let expected = InstructionResult::from(&fixture.output);
         result.compare_with_config(&expected, checks, &self.config);
         result
@@ -1619,6 +1635,7 @@ impl Mollusk {
     pub fn process_firedancer_fixture(
         &mut self,
         fixture: &mollusk_svm_fuzz_fixture_firedancer::Fixture,
+        log_collector: Option<Rc<RefCell<LogCollector>>>,
     ) -> InstructionResult {
         let fuzz::firedancer::ParsedFixtureContext {
             accounts,
@@ -1630,7 +1647,7 @@ impl Mollusk {
         self.compute_budget = compute_budget;
         self.feature_set = feature_set;
         self.slot = slot;
-        self.process_instruction(&instruction, &accounts)
+        self.process_instruction(&instruction, &accounts, log_collector)
     }
 
     #[cfg(feature = "fuzz-fd")]
@@ -1656,6 +1673,7 @@ impl Mollusk {
     pub fn process_and_validate_firedancer_fixture(
         &mut self,
         fixture: &mollusk_svm_fuzz_fixture_firedancer::Fixture,
+        log_collector: Option<Rc<RefCell<LogCollector>>>,
     ) -> InstructionResult {
         let fuzz::firedancer::ParsedFixtureContext {
             accounts,
@@ -1668,7 +1686,7 @@ impl Mollusk {
         self.feature_set = feature_set;
         self.slot = slot;
 
-        let result = self.process_instruction(&instruction, &accounts);
+        let result = self.process_instruction(&instruction, &accounts, log_collector);
         let expected_result = fuzz::firedancer::parse_fixture_effects(
             &accounts,
             self.compute_budget.compute_unit_limit,
@@ -1706,6 +1724,7 @@ impl Mollusk {
         &mut self,
         fixture: &mollusk_svm_fuzz_fixture_firedancer::Fixture,
         checks: &[Compare],
+        log_collector: Option<Rc<RefCell<LogCollector>>>,
     ) -> InstructionResult {
         let fuzz::firedancer::ParsedFixtureContext {
             accounts,
@@ -1718,7 +1737,7 @@ impl Mollusk {
         self.feature_set = feature_set;
         self.slot = slot;
 
-        let result = self.process_instruction(&instruction, &accounts);
+        let result = self.process_instruction(&instruction, &accounts, log_collector);
         let expected = fuzz::firedancer::parse_fixture_effects(
             &accounts,
             self.compute_budget.compute_unit_limit,
@@ -1841,20 +1860,20 @@ impl<AS: AccountStore> MolluskContext<AS> {
 
     /// Process an instruction using the minified Solana Virtual Machine (SVM)
     /// environment. Simply returns the result.
-    pub fn process_instruction(&self, instruction: &Instruction) -> InstructionResult {
+    pub fn process_instruction(&self, instruction: &Instruction,log_collector: Option<Rc<RefCell<LogCollector>>>,) -> InstructionResult {
         let accounts = self.load_accounts_for_instructions(once(instruction));
-        let result = self.mollusk.process_instruction(instruction, &accounts);
+        let result = self.mollusk.process_instruction(instruction, &accounts,log_collector);
         self.consume_mollusk_result(&result);
         result
     }
 
     /// Process a chain of instructions using the minified Solana Virtual
     /// Machine (SVM) environment.
-    pub fn process_instruction_chain(&self, instructions: &[Instruction]) -> InstructionResult {
+    pub fn process_instruction_chain(&self, instructions: &[Instruction], log_collector: Option<Rc<RefCell<LogCollector>>>,) -> InstructionResult {
         let accounts = self.load_accounts_for_instructions(instructions.iter());
         let result = self
             .mollusk
-            .process_instruction_chain(instructions, &accounts);
+            .process_instruction_chain(instructions, &accounts,log_collector);
         self.consume_mollusk_result(&result);
         result
     }
@@ -1865,11 +1884,12 @@ impl<AS: AccountStore> MolluskContext<AS> {
         &self,
         instruction: &Instruction,
         checks: &[Check],
+        log_collector: Option<Rc<RefCell<LogCollector>>>,
     ) -> InstructionResult {
         let accounts = self.load_accounts_for_instructions(once(instruction));
         let result = self
             .mollusk
-            .process_and_validate_instruction(instruction, &accounts, checks);
+            .process_and_validate_instruction(instruction, &accounts, checks, log_collector);
         self.consume_mollusk_result(&result);
         result
     }
@@ -1879,13 +1899,14 @@ impl<AS: AccountStore> MolluskContext<AS> {
     pub fn process_and_validate_instruction_chain(
         &self,
         instructions: &[(&Instruction, &[Check])],
+        log_collector: Option<Rc<RefCell<LogCollector>>>,
     ) -> InstructionResult {
         let accounts = self.load_accounts_for_instructions(
             instructions.iter().map(|(instruction, _)| *instruction),
         );
         let result = self
             .mollusk
-            .process_and_validate_instruction_chain(instructions, &accounts);
+            .process_and_validate_instruction_chain(instructions, &accounts,log_collector);
         self.consume_mollusk_result(&result);
         result
     }

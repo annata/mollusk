@@ -75,14 +75,14 @@ impl Runner {
         match self.proto {
             ProtoLayout::Mollusk => {
                 let fixture = mollusk_svm_fuzz_fixture::Fixture::load_from_blob_file(fixture_path);
-                let result = mollusk.process_fixture(&fixture);
+                let result = mollusk.process_fixture(&fixture, None);
                 let effects = (&fixture.output).into();
                 (result, effects)
             }
             ProtoLayout::Firedancer => {
                 let fixture =
                     mollusk_svm_fuzz_fixture_firedancer::Fixture::load_from_blob_file(fixture_path);
-                let result = mollusk.process_firedancer_fixture(&fixture);
+                let result = mollusk.process_firedancer_fixture(&fixture,None);
                 let (_, effects) = mollusk_svm::fuzz::firedancer::load_firedancer_fixture(&fixture);
                 (result, effects)
             }
